@@ -1,0 +1,12 @@
+type = "lib"
+
+[project]
+name = "tokio"
+description = "tokio project"
+version = "1.0.0"
+
+[build]
+format = "dir"
+
+[dependencies]
+result = { git = "https://github.com/sigmasoldi3r/result-saturnus" }

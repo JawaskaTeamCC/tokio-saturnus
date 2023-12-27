@@ -1,0 +1,85 @@
+use { Ok, Err } in result;
+
+let by_type = {};
+let typeless = [];
+
+fn add_event_listener(listener, filter) {
+    if filter == () {
+        typeless[listener] = listener;
+    } else {
+        if by_type[filter] == () {
+            by_type[filter] = [];
+        }
+        let btp = by_type[filter];
+        btp[listener] = listener;
+    }
+}
+
+fn remove_event_listener(listener, filter) {
+    if filter == () {
+        typeless[listener] = ();
+    } else {
+        if by_type[filter] <> () {
+            by_type[filter][listener] = ();
+        }
+    }
+}
+
+fn tokio() = target => {
+    let co = coroutine.create(target);
+    loop {
+        coroutine.resume(co);
+        let event_info = [os.pullEvent()];
+        if event_info[1] <> "next_tick" {
+            for listener in pairs(typeless) {
+                listener(...event_info);
+            }
+        }
+        let btp = by_type[event_info[1]];
+        if btp <> () {
+            for listener in pairs(btp) {
+                listener(...event_info);
+            }
+        }
+        os.queueEvent("next_tick");
+    }
+};
+
+let yield = coroutine.yield;
+
+fn await(future) {
+    while not future.resolved and not future.rejected {
+        yield();
+    }
+    if future.rejected {
+        return Err(future.error);
+    }
+    return Ok(future.value);
+}
+
+class Promise {
+    let resolved = false;
+    let rejected = false;
+    fn new(handler) {
+        let promise = Promise {};
+        let resolve = value => {
+            promise.resolved = true;
+            promise.value = value;
+        };
+        let reject = value => {
+            promise.rejected = true;
+            promise.error = value;
+        };
+        handler(resolve, reject);
+        return promise;
+    }
+}
+
+return {
+    tokio,
+    yield,
+    await,
+    add_event_listener,
+    remove_event_listener,
+    Promise
+};
