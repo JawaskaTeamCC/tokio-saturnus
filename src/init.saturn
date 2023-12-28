@@ -28,7 +28,6 @@ fn remove_event_listener(listener, filter) {
 fn tokio() = target => {
     let co = coroutine.create(target);
     loop {
-        coroutine.resume(co);
         let event_info = [os.pullEvent()];
         if event_info[1] <> "next_tick" {
             for listener in pairs(typeless) {
@@ -41,6 +40,14 @@ fn tokio() = target => {
                 listener(...event_info);
             }
         }
+        if coroutine.status(co) <> "dead" {
+            let [ok, err]  = [coroutine.resume(co)];
+            if not ok {
+                panic!("Coroutine panicked!
+  Stack traceback:
+    " ++ err);
+            }
+        }
         os.queueEvent("next_tick");
     }
 };
@@ -48,13 +55,14 @@ fn tokio() = target => {
 let yield = coroutine.yield;
 
 fn await(future) {
-    while not future.resolved and not future.rejected {
+    loop {
+        if future.rejected {
+            return Err(future.error);
+        } else if future.resolved {
+            return Ok(future.value);
+        }
         yield();
     }
-    if future.rejected {
-        return Err(future.error);
-    }
-    return Ok(future.value);
 }
 
 class Promise {
