@@ -1,69 +1,6 @@
 use { Ok, Err } in result;
 
-let by_type = {};
-let typeless = [];
-
-fn add_event_listener(listener, filter) {
-    if filter == () {
-        typeless[listener] = listener;
-    } else {
-        if by_type[filter] == () {
-            by_type[filter] = [];
-        }
-        let btp = by_type[filter];
-        btp[listener] = listener;
-    }
-}
-
-fn remove_event_listener(listener, filter) {
-    if filter == () {
-        typeless[listener] = ();
-    } else {
-        if by_type[filter] <> () {
-            by_type[filter][listener] = ();
-        }
-    }
-}
-
-fn tokio() = target => {
-    let co = coroutine.create(target);
-    loop {
-        let event_info = [os.pullEvent()];
-        if event_info[1] <> "next_tick" {
-            for listener in pairs(typeless) {
-                listener(...event_info);
-            }
-        }
-        let btp = by_type[event_info[1]];
-        if btp <> () {
-            for listener in pairs(btp) {
-                listener(...event_info);
-            }
-        }
-        if coroutine.status(co) <> "dead" {
-            let [ok, err]  = [coroutine.resume(co)];
-            if not ok {
-                panic!("Coroutine panicked!
-  Stack traceback:
-    " ++ err);
-            }
-        }
-        os.queueEvent("next_tick");
-    }
-};
-
 let yield = coroutine.yield;
-
-fn await(future) {
-    loop {
-        if future.rejected {
-            return Err(future.error);
-        } else if future.resolved {
-            return Ok(future.value);
-        }
-        yield();
-    }
-}
 
 class Promise {
     let resolved = false;
@@ -81,13 +18,154 @@ class Promise {
         handler(resolve, reject);
         return promise;
     }
+    fn on_resolve(self, after) {
+        return Promise.new(r => {
+            let res = await(self);
+            r(after(res));
+        });
+    }
+    fn await(self) {
+        loop {
+            if self.rejected {
+                return Err(self.error);
+            } else if self.resolved {
+                return Ok(self.value);
+            }
+            yield();
+        }
+    }
 }
+
+fn count(tbl) {
+    let i = 0;
+    for _ in pairs(tbl) {
+        i += 1;
+    }
+    return i;
+}
+
+/// # Event Loop
+/// The Ev class is the core of coelo.
+class Ev {
+    fn new() = Ev {
+        listener_table: {}
+    };
+
+    /// Add the event handler to the event loop!
+    /// Your handler function will be fired each time the
+    /// event loop passes the matching event.
+    fn on(self, event, handler) {
+        if self.listener_table[event] == () {
+            self.listener_table[event] = {};
+        }
+        self.listener_table[event][handler] = true;
+        return () => self->off(event, handler);
+    }
+
+    /// Remove the event listener.
+    /// Does nothing if was not registered. Also frees up the event
+    /// matching tables.
+    fn off(self, event, handler) {
+        if self.listener_table[event] == () {
+            return;
+        }
+        if not self.listener_table[event][handler] {
+            return;
+        }
+        self.listener_table[event][handler] = ();
+        if count(self.listener_table[event]) <= 0 {
+            self.listener_table[event] = ();
+        }
+    }
+
+    /// This function is like the "on" function but it does autoremove
+    /// once fired. To clean/abort "once" listners you must use the
+    /// returned cleanup function.
+    fn once(self, event, handler) {
+        let wrapper;
+        wrapper = (*args) => {
+            self->off(event, wrapper);
+            handler(...args);
+        };
+        return self->on(event, wrapper);
+    }
+
+    /// Pushes an event to the loop.
+    fn push(self, event, *args) {
+        os.queueEvent(event, ...args);
+    }
+
+    /// Start the event loop. *WARNING* This action is thread-blocking!
+    /// ### Remarks
+    /// Remember to launch threads or add event listeners before calling
+    /// this method!
+    fn run(self) {
+        loop {
+            let event_info = [os.pullEvent()];
+            if count(event_info) > 0 {
+                self->_fire_listeners(event_info[1], event_info);
+                self->_fire_listeners("*", event_info);
+                self->push("next_tick");
+            }
+        }
+    }
+
+    // private - fires the events, if any handler.
+    fn _fire_listeners(self, target, info) {
+        if self.listener_table[target] <> () {
+            for handler in pairs(self.listener_table[target]) {
+                handler(...info);
+            }
+        }
+    }
+
+    /// Creates a new light thread.
+    fn launch(self, thread) {
+        let co = coroutine.create(thread);
+        let exit_thread;
+        exit_thread = self->on("next_tick", () => {
+            if coroutine.status(co) == "dead" {
+                exit_thread();
+            } else {
+                let [ok, err]  = [coroutine.resume(co)];
+                if not ok {
+                    exit_thread();
+                    self->push("thread_panic", tostring(err), tostring(co), tostring(thread));
+                }
+            }
+        });
+    }
+
+    /// A handy wrapper for a once-time timer event.
+    fn timeout(self, callback, time) {
+        time = time ?? 0;
+        let clean;
+        let timer_id;
+        clean = self->on("timer", (_, id) => {
+            if id == timer_id {
+                clean();
+                callback();
+            }
+        });
+        timer_id = os.startTimer(time);
+        return clean;
+    }
+
+    fn timeout_promise(self, time) = Promise.new(r => self->timeout(r, time));
+}
+let ev = Ev.new();
+
+/// The default launch event function
+fn tokio(alt_ev) = target => {
+    alt_ev = alt_ev ?? ev;
+    alt_ev->launch(target);
+    alt_ev->run();
+};
 
 return {
     tokio,
     yield,
-    await,
-    add_event_listener,
-    remove_event_listener,
-    Promise
+    Promise,
+    Ev,
+    ev
 };
