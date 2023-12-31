@@ -116,7 +116,7 @@ class Ev {
             if count(event_info) > 0 {
                 self->_fire_listeners(event_info[1], event_info);
                 self->_fire_listeners("*", event_info);
-                self->push("next_tick");
+                // self->push("next_tick");
             }
         }
     }
