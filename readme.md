@@ -61,6 +61,18 @@ fn main() {
 }
 ```
 
+Usage in **pure Lua**:
+
+```lua
+local t = require("tokio");
+
+t.ev:on("modem_message", function()
+  print("Whoa! a message!");
+end);
+t.ev:run();
+```
+
+
 Why "tokio"? Because the _Rust_ library _"tokio.rs"_ gave
 me the idea or the inspiration, but this project resembles
 more to the _NodeJS's event loop_ than anything.
