@@ -48,14 +48,14 @@ fn count(tbl) {
 /// The Ev class is the core of coelo.
 class Ev {
     let should_exit = false;
-    let exit_reason = 0;
 
     fn new() = Ev {
-        listener_table: {}
+        listener_table: {},
+        coroutines: []
     };
 
-    fn exit(self, reason) {
-        self.exit_reason = reason;
+    fn exit(self, panic_reason) {
+        self.panic_reason = panic_reason;
         self.should_exit = true;
     }
 
@@ -107,16 +107,33 @@ class Ev {
     /// ### Remarks
     /// Remember to launch threads or add event listeners before calling
     /// this method!
-    fn run(self) {
+    fn run(self, target) {
+        if type(target) == "function" {
+            let co = coroutine.create(target);
+            self.coroutines[co] = co;
+        }
         loop {
             if self.should_exit {
-                return self.exit_reason;
+                if self.panic_reason <> () {
+                    error(self.panic_reason);
+                } else {
+                    return ();
+                }
             }
             let event_info = [os.pullEvent()];
             if count(event_info) > 0 {
                 self->_fire_listeners(event_info[1], event_info);
                 self->_fire_listeners("*", event_info);
-                // self->push("next_tick");
+            }
+            for co in pairs(self.coroutines) {
+                if coroutine.status(co) == "dead" {
+                    self.coroutines[co] = ();
+                } else {
+                    let [ok, err]  = [coroutine.resume(co)];
+                    if not ok {
+                        self->exit(err);
+                    }
+                }
             }
         }
     }
@@ -133,18 +150,7 @@ class Ev {
     /// Creates a new light thread.
     fn launch(self, thread) {
         let co = coroutine.create(thread);
-        let exit_thread;
-        exit_thread = self->on("next_tick", () => {
-            if coroutine.status(co) == "dead" {
-                exit_thread();
-            } else {
-                let [ok, err]  = [coroutine.resume(co)];
-                if not ok {
-                    exit_thread();
-                    self->push("thread_panic", tostring(err), tostring(co), tostring(thread));
-                }
-            }
-        });
+        self.coroutines[co] = co;
     }
 
     /// A handy wrapper for a once-time timer event.
@@ -169,8 +175,7 @@ let ev = Ev.new();
 /// The default launch event function
 fn tokio(alt_ev) = target => {
     alt_ev = alt_ev ?? ev;
-    alt_ev->launch(target);
-    alt_ev->run();
+    alt_ev->run(target);
 };
 
 return {
